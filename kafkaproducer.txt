@@ -1,0 +1,48 @@
+import java.util.Properties
+import org.apache.kafka.clients.producer.ProducerConfig
+
+val props = new Properties()
+props.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, "<your-bootstrap-servers>")
+props.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, "org.apache.kafka.common.serialization.StringSerializer")
+props.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, "io.confluent.kafka.serializers.KafkaAvroSerializer")
+props.put("schema.registry.url", "<your-schema-registry-url>")
+
+case class XmlData(name: String, age: Int)
+
+{
+  "namespace": "com.example",
+  "type": "record",
+  "name": "XmlData",
+  "fields": [
+    {"name": "name", "type": "string"},
+    {"name": "age", "type": "int"}
+  ]
+}
+
+import com.sksamuel.avro4s._
+import scala.xml.XML
+
+val xml = "<XmlData><name>John</name><age>30</age></XmlData>"
+val data = XmlData((XML.loadString(xml) \ "name").text, (XML.loadString(xml) \ "age").text.toInt)
+val avroData = AvroOutputStream.data[XmlData].toByteArray(data)
+
+import org.apache.kafka.clients.producer.KafkaProducer
+import org.apache.kafka.clients.producer.ProducerRecord
+
+val producer = new KafkaProducer[String, Array[Byte]](props)
+val record = new ProducerRecord[String, Array[Byte]]("<your-topic>", avroData)
+producer.send(record)
+
+import scalaj.http.Http
+
+val newSchema = "{\"namespace\":\"com.example\",\"type\":\"record\",\"name\":\"XmlData\",\"fields\":[{\"name\":\"name\",\"type\":\"string\"},{\"name\":\"age\",\"type\":\"long\"}]}"
+val schemaId = Http("<your-schema-registry-url>/subjects/<your-topic>-value/versions/latest").method("GET").asString.body.split(",")(0).split(":")(1).toInt
+val response = Http("<your-schema-registry-url>/subjects/<your-topic>-value/versions").postData(newSchema).header("Content-Type", "application/vnd.schemaregistry.v1+json").header("Accept", "application/vnd.schemaregistry.v1+json").asString
+val newSchemaId = response.body.split(",")(0).split(":")(1).toInt
+if (newSchemaId != schemaId) {
+  producer.flush()
+  producer.close()
+  props.put("value.schema.id", newSchemaId.toString)
+  producer = new KafkaProducer[String, Array[Byte]](props)
+}
+
