@@ -1,0 +1,46 @@
+
+{
+  "type": "record",
+  "name": "CSVRecord",
+  "fields": [
+    {"name": "id", "type": "int"},
+    {"name": "name", "type": "string"},
+    {"name": "age", "type": "int"},
+    {"name": "email", "type": "string"}
+  ]
+}
+
+import java.util.Properties
+
+val props = new Properties()
+props.put("bootstrap.servers", "<AWS MSK broker endpoints>")
+props.put("acks", "all")
+props.put("retries", 0)
+props.put("batch.size", 16384)
+props.put("linger.ms", 1)
+props.put("buffer.memory", 33554432)
+props.put("key.serializer", "org.apache.kafka.common.serialization.StringSerializer")
+props.put("value.serializer", "io.confluent.kafka.serializers.KafkaAvroSerializer")
+props.put("schema.registry.url", "<Confluent Schema Registry URL>")
+
+import org.apache.kafka.clients.producer.{KafkaProducer, ProducerRecord}
+
+val producer = new KafkaProducer[String, GenericRecord](props)
+import org.apache.avro.generic.GenericData
+import org.apache.avro.generic.GenericRecord
+
+val topic = "my-topic"
+val schema = new Schema.Parser().parse(schemaString)
+
+val csvRecord = "1,John,30,john@example.com"
+val values = csvRecord.split(",")
+val record = new GenericData.Record(schema)
+record.put("id", values(0).toInt)
+record.put("name", values(1))
+record.put("age", values(2).toInt)
+record.put("email", values(3))
+
+val message = new ProducerRecord[String, GenericRecord](topic, record)
+producer.send(message)
+
+producer.close()
